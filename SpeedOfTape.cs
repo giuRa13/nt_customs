@@ -106,10 +106,14 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
                 DaysToCalculate = 3;
 
                 // Subgraphs
-                BullBorder = MakeBrush("#FF1B88F4");
+                /*BullBorder = MakeBrush("#FF1B88F4");
                 BullFill = MakeBrush("#FF1B88F4");
                 BearBorder = MakeBrush("#FFD83C3C");
-                BearFill = MakeBrush("#FFD83C3C");
+                BearFill = MakeBrush("#FFD83C3C");*/
+                BullBorder = MakeBrush("#FF1B88F4");
+                BullFill = MakeBrush("#FF1B88F4");
+                BearBorder = MakeBrush("#FFFF3755");
+                BearFill = MakeBrush("#FFFF3755");
                 UnmarkedOpacity = 35;
                 UseGradient = true;
                 GradientNeutral = Brushes.White;
