@@ -1,0 +1,8 @@
+/*
+!/.gitignore
+!/Indicators/
+/Indicators/*
+!/Indicators/giuli13/
+!/AddOns/
+/AddOns/*
+!/AddOns/giuli13/
