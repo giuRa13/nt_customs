@@ -1042,7 +1042,12 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
             if (TipPeak)
                 texts.Add(Text("Peak:  " + FormatValue(v.Peak), textBrush, dpi));
             if (TipDelta)
-                texts.Add(Text("Delta: " + (v.Buy - v.Sell).ToString("+0;-0;0", CultureInfo.InvariantCulture), textBrush, dpi));
+            {
+                //texts.Add(Text("Delta: " + (v.Buy - v.Sell).ToString("+0;-0;0", CultureInfo.InvariantCulture), textBrush, dpi));
+                double delta = v.Buy - v.Sell;
+                SWM.Brush deltaBrush = delta > 0 ? Solid(cBullFill, 1) : delta < 0 ? Solid(cBearFill, 1) : textBrush;
+                texts.Add(Text("Delta: " + delta.ToString("+0;-0;0", CultureInfo.InvariantCulture), deltaBrush, dpi));
+            }
             if (TipBuySell)
                 texts.Add(Text("Buy " + FormatValue(v.Buy) + " / Sell " + FormatValue(v.Sell), textBrush, dpi));
 
