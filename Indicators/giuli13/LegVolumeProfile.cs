@@ -44,13 +44,6 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
         GlobalGrid = 1     // rows sit on one fixed price grid shared by all legs
     }
 
-    public enum LegVPLineStart
-    {
-        CandleStart = 0,    // lines start at the left edge of the leg's first candle
-        CandleMiddle = 1,   // ...at the middle of the first candle
-        CandleEnd = 2       // ...at the right edge of the first candle
-    }
-
     public enum LegVPRotationMode
     {
         DistanceFromExtreme = 0,
@@ -145,25 +138,25 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
                 RowAlignment = LegVPRowAlign.FromLegHigh;
                 MaxProfileWidthPx = 600;
                 CurrentLegOffsetPx = 50;
-                LinesStartAt = LegVPLineStart.CandleMiddle;
 
                 // Leg frame: each side can be shown or hidden
                 ShowLeftLine = true;
                 LeftStroke = new Stroke(WpfBrushes.Black, DashStyleHelper.Dash, 1);
                 ShowTopLine = true;
                 TopStroke = new Stroke(WpfBrushes.Black, DashStyleHelper.Dash, 1);
-                ShowBottomLine = false;
+                ShowBottomLine = true;
                 BottomStroke = new Stroke(WpfBrushes.Black, DashStyleHelper.Dash, 1);
                 ShowRightLine = false;
                 RightStroke = new Stroke(WpfBrushes.Black, DashStyleHelper.Dash, 1);
 
                 // Colors
-                ProfileBrush = MakeBrush("#FF363B47");
+                ProfileBrush = MakeBrush("#FF2E3139");
                 ValueAreaBrush = MakeBrush("#FF5B6473");
                 PocBrush = WpfBrushes.White;
-                ProfileOpacity = 0.60f;
+                ProfileOpacity = 0.85f;
 
                 // Lines (standard NinjaTrader stroke settings: color, dash style, width, opacity)
+                LevelLineLengthPercent = 95;
                 ShowPocLine = true;
                 PocStroke = new Stroke(WpfBrushes.White, DashStyleHelper.Solid, 2);
                 ShowVahLine = true;
@@ -172,7 +165,7 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
                 ValStroke = new Stroke(MakeBrush("#FF5B6473"), DashStyleHelper.Dash, 1);
 
                 // Text
-                ShowValues = true;
+                ShowValues = false;
                 AutoFontMin = 6;
                 AutoFontMax = 18;
                 TextBrush = WpfBrushes.LightGray;
@@ -571,10 +564,7 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
                 : Math.Min(MaxProfileWidthPx, Math.Max(10f, legPx));
 
             float spineX = xEnd + barW * 0.5f + offsetPx;   // profile anchor: right edge of the leg's last bar (+ live leg offset)
-            // where the left line and all horizontal lines start, inside the leg's first candle
-            float legLeftX = LinesStartAt == LegVPLineStart.CandleEnd ? xStart + barW * 0.5f
-                : LinesStartAt == LegVPLineStart.CandleMiddle ? xStart
-                : xStart - barW * 0.5f;
+            float legLeftX = xStart + barW * 0.5f;   // frame starts at the right edge of the leg's first candle
             float panelTop = ChartPanel.Y;
             float panelBottom = ChartPanel.Y + ChartPanel.H;
 
@@ -667,11 +657,12 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
                         new RectangleF(textLeft, top, textRight - textLeft, height), textBrushDx);
             }
 
-            // ---- POC / VAH / VAL lines: from the leg start to the profile anchor, at the center of their row ----
+            // ---- POC / VAH / VAL lines: drawn from the leg end back toward the leg start, for the chosen % of the leg ----
             float lineRight = spineX;
-            if (ShowValLine) DrawLevelLine(chartScale, ValStroke, minKey, vaLow, groupTicks, legLeftX, lineRight, panelTop, panelBottom);
-            if (ShowVahLine) DrawLevelLine(chartScale, VahStroke, minKey, vaHigh, groupTicks, legLeftX, lineRight, panelTop, panelBottom);
-            if (ShowPocLine) DrawLevelLine(chartScale, PocStroke, minKey, poc, groupTicks, legLeftX, lineRight, panelTop, panelBottom);
+            float lineLeft = spineX - (spineX - legLeftX) * (LevelLineLengthPercent / 100f);
+            if (ShowValLine) DrawLevelLine(chartScale, ValStroke, minKey, vaLow, groupTicks, lineLeft, lineRight, panelTop, panelBottom);
+            if (ShowVahLine) DrawLevelLine(chartScale, VahStroke, minKey, vaHigh, groupTicks, lineLeft, lineRight, panelTop, panelBottom);
+            if (ShowPocLine) DrawLevelLine(chartScale, PocStroke, minKey, poc, groupTicks, lineLeft, lineRight, panelTop, panelBottom);
         }
 
         private void DrawFrameLine(Stroke stroke, float x0, float y0, float x1, float y1)
@@ -919,11 +910,6 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
 
         // ===== Leg Frame =====
         [NinjaScriptProperty]
-        [Display(Name = "Lines Start At", Order = -1, GroupName = "Leg Frame",
-            Description = "Where the left line and all horizontal lines (top, bottom, POC, VAH, VAL) start inside the leg's first candle: its left edge, its middle or its right edge.")]
-        public LegVPLineStart LinesStartAt { get; set; }
-
-        [NinjaScriptProperty]
         [Display(Name = "Show Left Line", Order = 0, GroupName = "Leg Frame",
             Description = "Vertical line at the leg start, spanning the leg's price range.")]
         public bool ShowLeftLine { get; set; }
@@ -1000,6 +986,12 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
 
         // ===== Lines =====
         [NinjaScriptProperty]
+        [Range(1, 100)]
+        [Display(Name = "Line Length (%)", Order = -1, GroupName = "Lines",
+            Description = "Length of the POC, VAH and VAL lines as a % of the leg width, measured from the leg end back toward the leg start. 100 = full leg, 95 = leaves a small gap before the previous leg.")]
+        public int LevelLineLengthPercent { get; set; }
+
+        [NinjaScriptProperty]
         [Display(Name = "Show POC Line", Order = 0, GroupName = "Lines",
             Description = "Horizontal line at the POC from the leg start to the leg end.")]
         public bool ShowPocLine { get; set; }
@@ -1062,18 +1054,18 @@ namespace NinjaTrader.NinjaScript.Indicators
 	public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
 	{
 		private giuli13.LegVolumeProfile[] cacheLegVolumeProfile;
-		public giuli13.LegVolumeProfile LegVolumeProfile(LegVPRotationMode rotationMode, double rotationPoints, bool resetOnNewSession, int legsToDisplay, int ticksPerRow, int valueAreaPercent, LegVPWidthMode widthMode, int maxProfileWidthPx, LegVPRowAlign rowAlignment, int currentLegOffsetPx, LegVPLineStart linesStartAt, bool showLeftLine, bool showTopLine, bool showBottomLine, bool showRightLine, WpfBrush profileBrush, WpfBrush valueAreaBrush, WpfBrush pocBrush, float profileOpacity, bool showPocLine, bool showVahLine, bool showValLine, bool showValues, int autoFontMin, int autoFontMax, WpfBrush textBrush)
+		public giuli13.LegVolumeProfile LegVolumeProfile(LegVPRotationMode rotationMode, double rotationPoints, bool resetOnNewSession, int legsToDisplay, int ticksPerRow, int valueAreaPercent, LegVPWidthMode widthMode, int maxProfileWidthPx, LegVPRowAlign rowAlignment, int currentLegOffsetPx, bool showLeftLine, bool showTopLine, bool showBottomLine, bool showRightLine, WpfBrush profileBrush, WpfBrush valueAreaBrush, WpfBrush pocBrush, float profileOpacity, int levelLineLengthPercent, bool showPocLine, bool showVahLine, bool showValLine, bool showValues, int autoFontMin, int autoFontMax, WpfBrush textBrush)
 		{
-			return LegVolumeProfile(Input, rotationMode, rotationPoints, resetOnNewSession, legsToDisplay, ticksPerRow, valueAreaPercent, widthMode, maxProfileWidthPx, rowAlignment, currentLegOffsetPx, linesStartAt, showLeftLine, showTopLine, showBottomLine, showRightLine, profileBrush, valueAreaBrush, pocBrush, profileOpacity, showPocLine, showVahLine, showValLine, showValues, autoFontMin, autoFontMax, textBrush);
+			return LegVolumeProfile(Input, rotationMode, rotationPoints, resetOnNewSession, legsToDisplay, ticksPerRow, valueAreaPercent, widthMode, maxProfileWidthPx, rowAlignment, currentLegOffsetPx, showLeftLine, showTopLine, showBottomLine, showRightLine, profileBrush, valueAreaBrush, pocBrush, profileOpacity, levelLineLengthPercent, showPocLine, showVahLine, showValLine, showValues, autoFontMin, autoFontMax, textBrush);
 		}
 
-		public giuli13.LegVolumeProfile LegVolumeProfile(ISeries<double> input, LegVPRotationMode rotationMode, double rotationPoints, bool resetOnNewSession, int legsToDisplay, int ticksPerRow, int valueAreaPercent, LegVPWidthMode widthMode, int maxProfileWidthPx, LegVPRowAlign rowAlignment, int currentLegOffsetPx, LegVPLineStart linesStartAt, bool showLeftLine, bool showTopLine, bool showBottomLine, bool showRightLine, WpfBrush profileBrush, WpfBrush valueAreaBrush, WpfBrush pocBrush, float profileOpacity, bool showPocLine, bool showVahLine, bool showValLine, bool showValues, int autoFontMin, int autoFontMax, WpfBrush textBrush)
+		public giuli13.LegVolumeProfile LegVolumeProfile(ISeries<double> input, LegVPRotationMode rotationMode, double rotationPoints, bool resetOnNewSession, int legsToDisplay, int ticksPerRow, int valueAreaPercent, LegVPWidthMode widthMode, int maxProfileWidthPx, LegVPRowAlign rowAlignment, int currentLegOffsetPx, bool showLeftLine, bool showTopLine, bool showBottomLine, bool showRightLine, WpfBrush profileBrush, WpfBrush valueAreaBrush, WpfBrush pocBrush, float profileOpacity, int levelLineLengthPercent, bool showPocLine, bool showVahLine, bool showValLine, bool showValues, int autoFontMin, int autoFontMax, WpfBrush textBrush)
 		{
 			if (cacheLegVolumeProfile != null)
 				for (int idx = 0; idx < cacheLegVolumeProfile.Length; idx++)
-					if (cacheLegVolumeProfile[idx] != null && cacheLegVolumeProfile[idx].RotationMode == rotationMode && cacheLegVolumeProfile[idx].RotationPoints == rotationPoints && cacheLegVolumeProfile[idx].ResetOnNewSession == resetOnNewSession && cacheLegVolumeProfile[idx].LegsToDisplay == legsToDisplay && cacheLegVolumeProfile[idx].TicksPerRow == ticksPerRow && cacheLegVolumeProfile[idx].ValueAreaPercent == valueAreaPercent && cacheLegVolumeProfile[idx].WidthMode == widthMode && cacheLegVolumeProfile[idx].MaxProfileWidthPx == maxProfileWidthPx && cacheLegVolumeProfile[idx].RowAlignment == rowAlignment && cacheLegVolumeProfile[idx].CurrentLegOffsetPx == currentLegOffsetPx && cacheLegVolumeProfile[idx].LinesStartAt == linesStartAt && cacheLegVolumeProfile[idx].ShowLeftLine == showLeftLine && cacheLegVolumeProfile[idx].ShowTopLine == showTopLine && cacheLegVolumeProfile[idx].ShowBottomLine == showBottomLine && cacheLegVolumeProfile[idx].ShowRightLine == showRightLine && cacheLegVolumeProfile[idx].ProfileBrush == profileBrush && cacheLegVolumeProfile[idx].ValueAreaBrush == valueAreaBrush && cacheLegVolumeProfile[idx].PocBrush == pocBrush && cacheLegVolumeProfile[idx].ProfileOpacity == profileOpacity && cacheLegVolumeProfile[idx].ShowPocLine == showPocLine && cacheLegVolumeProfile[idx].ShowVahLine == showVahLine && cacheLegVolumeProfile[idx].ShowValLine == showValLine && cacheLegVolumeProfile[idx].ShowValues == showValues && cacheLegVolumeProfile[idx].AutoFontMin == autoFontMin && cacheLegVolumeProfile[idx].AutoFontMax == autoFontMax && cacheLegVolumeProfile[idx].TextBrush == textBrush && cacheLegVolumeProfile[idx].EqualsInput(input))
+					if (cacheLegVolumeProfile[idx] != null && cacheLegVolumeProfile[idx].RotationMode == rotationMode && cacheLegVolumeProfile[idx].RotationPoints == rotationPoints && cacheLegVolumeProfile[idx].ResetOnNewSession == resetOnNewSession && cacheLegVolumeProfile[idx].LegsToDisplay == legsToDisplay && cacheLegVolumeProfile[idx].TicksPerRow == ticksPerRow && cacheLegVolumeProfile[idx].ValueAreaPercent == valueAreaPercent && cacheLegVolumeProfile[idx].WidthMode == widthMode && cacheLegVolumeProfile[idx].MaxProfileWidthPx == maxProfileWidthPx && cacheLegVolumeProfile[idx].RowAlignment == rowAlignment && cacheLegVolumeProfile[idx].CurrentLegOffsetPx == currentLegOffsetPx && cacheLegVolumeProfile[idx].ShowLeftLine == showLeftLine && cacheLegVolumeProfile[idx].ShowTopLine == showTopLine && cacheLegVolumeProfile[idx].ShowBottomLine == showBottomLine && cacheLegVolumeProfile[idx].ShowRightLine == showRightLine && cacheLegVolumeProfile[idx].ProfileBrush == profileBrush && cacheLegVolumeProfile[idx].ValueAreaBrush == valueAreaBrush && cacheLegVolumeProfile[idx].PocBrush == pocBrush && cacheLegVolumeProfile[idx].ProfileOpacity == profileOpacity && cacheLegVolumeProfile[idx].LevelLineLengthPercent == levelLineLengthPercent && cacheLegVolumeProfile[idx].ShowPocLine == showPocLine && cacheLegVolumeProfile[idx].ShowVahLine == showVahLine && cacheLegVolumeProfile[idx].ShowValLine == showValLine && cacheLegVolumeProfile[idx].ShowValues == showValues && cacheLegVolumeProfile[idx].AutoFontMin == autoFontMin && cacheLegVolumeProfile[idx].AutoFontMax == autoFontMax && cacheLegVolumeProfile[idx].TextBrush == textBrush && cacheLegVolumeProfile[idx].EqualsInput(input))
 						return cacheLegVolumeProfile[idx];
-			return CacheIndicator<giuli13.LegVolumeProfile>(new giuli13.LegVolumeProfile(){ RotationMode = rotationMode, RotationPoints = rotationPoints, ResetOnNewSession = resetOnNewSession, LegsToDisplay = legsToDisplay, TicksPerRow = ticksPerRow, ValueAreaPercent = valueAreaPercent, WidthMode = widthMode, MaxProfileWidthPx = maxProfileWidthPx, RowAlignment = rowAlignment, CurrentLegOffsetPx = currentLegOffsetPx, LinesStartAt = linesStartAt, ShowLeftLine = showLeftLine, ShowTopLine = showTopLine, ShowBottomLine = showBottomLine, ShowRightLine = showRightLine, ProfileBrush = profileBrush, ValueAreaBrush = valueAreaBrush, PocBrush = pocBrush, ProfileOpacity = profileOpacity, ShowPocLine = showPocLine, ShowVahLine = showVahLine, ShowValLine = showValLine, ShowValues = showValues, AutoFontMin = autoFontMin, AutoFontMax = autoFontMax, TextBrush = textBrush }, input, ref cacheLegVolumeProfile);
+			return CacheIndicator<giuli13.LegVolumeProfile>(new giuli13.LegVolumeProfile(){ RotationMode = rotationMode, RotationPoints = rotationPoints, ResetOnNewSession = resetOnNewSession, LegsToDisplay = legsToDisplay, TicksPerRow = ticksPerRow, ValueAreaPercent = valueAreaPercent, WidthMode = widthMode, MaxProfileWidthPx = maxProfileWidthPx, RowAlignment = rowAlignment, CurrentLegOffsetPx = currentLegOffsetPx, ShowLeftLine = showLeftLine, ShowTopLine = showTopLine, ShowBottomLine = showBottomLine, ShowRightLine = showRightLine, ProfileBrush = profileBrush, ValueAreaBrush = valueAreaBrush, PocBrush = pocBrush, ProfileOpacity = profileOpacity, LevelLineLengthPercent = levelLineLengthPercent, ShowPocLine = showPocLine, ShowVahLine = showVahLine, ShowValLine = showValLine, ShowValues = showValues, AutoFontMin = autoFontMin, AutoFontMax = autoFontMax, TextBrush = textBrush }, input, ref cacheLegVolumeProfile);
 		}
 	}
 }
@@ -1082,14 +1074,14 @@ namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
 	public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
 	{
-		public Indicators.giuli13.LegVolumeProfile LegVolumeProfile(LegVPRotationMode rotationMode, double rotationPoints, bool resetOnNewSession, int legsToDisplay, int ticksPerRow, int valueAreaPercent, LegVPWidthMode widthMode, int maxProfileWidthPx, LegVPRowAlign rowAlignment, int currentLegOffsetPx, LegVPLineStart linesStartAt, bool showLeftLine, bool showTopLine, bool showBottomLine, bool showRightLine, WpfBrush profileBrush, WpfBrush valueAreaBrush, WpfBrush pocBrush, float profileOpacity, bool showPocLine, bool showVahLine, bool showValLine, bool showValues, int autoFontMin, int autoFontMax, WpfBrush textBrush)
+		public Indicators.giuli13.LegVolumeProfile LegVolumeProfile(LegVPRotationMode rotationMode, double rotationPoints, bool resetOnNewSession, int legsToDisplay, int ticksPerRow, int valueAreaPercent, LegVPWidthMode widthMode, int maxProfileWidthPx, LegVPRowAlign rowAlignment, int currentLegOffsetPx, bool showLeftLine, bool showTopLine, bool showBottomLine, bool showRightLine, WpfBrush profileBrush, WpfBrush valueAreaBrush, WpfBrush pocBrush, float profileOpacity, int levelLineLengthPercent, bool showPocLine, bool showVahLine, bool showValLine, bool showValues, int autoFontMin, int autoFontMax, WpfBrush textBrush)
 		{
-			return indicator.LegVolumeProfile(Input, rotationMode, rotationPoints, resetOnNewSession, legsToDisplay, ticksPerRow, valueAreaPercent, widthMode, maxProfileWidthPx, rowAlignment, currentLegOffsetPx, linesStartAt, showLeftLine, showTopLine, showBottomLine, showRightLine, profileBrush, valueAreaBrush, pocBrush, profileOpacity, showPocLine, showVahLine, showValLine, showValues, autoFontMin, autoFontMax, textBrush);
+			return indicator.LegVolumeProfile(Input, rotationMode, rotationPoints, resetOnNewSession, legsToDisplay, ticksPerRow, valueAreaPercent, widthMode, maxProfileWidthPx, rowAlignment, currentLegOffsetPx, showLeftLine, showTopLine, showBottomLine, showRightLine, profileBrush, valueAreaBrush, pocBrush, profileOpacity, levelLineLengthPercent, showPocLine, showVahLine, showValLine, showValues, autoFontMin, autoFontMax, textBrush);
 		}
 
-		public Indicators.giuli13.LegVolumeProfile LegVolumeProfile(ISeries<double> input , LegVPRotationMode rotationMode, double rotationPoints, bool resetOnNewSession, int legsToDisplay, int ticksPerRow, int valueAreaPercent, LegVPWidthMode widthMode, int maxProfileWidthPx, LegVPRowAlign rowAlignment, int currentLegOffsetPx, LegVPLineStart linesStartAt, bool showLeftLine, bool showTopLine, bool showBottomLine, bool showRightLine, WpfBrush profileBrush, WpfBrush valueAreaBrush, WpfBrush pocBrush, float profileOpacity, bool showPocLine, bool showVahLine, bool showValLine, bool showValues, int autoFontMin, int autoFontMax, WpfBrush textBrush)
+		public Indicators.giuli13.LegVolumeProfile LegVolumeProfile(ISeries<double> input , LegVPRotationMode rotationMode, double rotationPoints, bool resetOnNewSession, int legsToDisplay, int ticksPerRow, int valueAreaPercent, LegVPWidthMode widthMode, int maxProfileWidthPx, LegVPRowAlign rowAlignment, int currentLegOffsetPx, bool showLeftLine, bool showTopLine, bool showBottomLine, bool showRightLine, WpfBrush profileBrush, WpfBrush valueAreaBrush, WpfBrush pocBrush, float profileOpacity, int levelLineLengthPercent, bool showPocLine, bool showVahLine, bool showValLine, bool showValues, int autoFontMin, int autoFontMax, WpfBrush textBrush)
 		{
-			return indicator.LegVolumeProfile(input, rotationMode, rotationPoints, resetOnNewSession, legsToDisplay, ticksPerRow, valueAreaPercent, widthMode, maxProfileWidthPx, rowAlignment, currentLegOffsetPx, linesStartAt, showLeftLine, showTopLine, showBottomLine, showRightLine, profileBrush, valueAreaBrush, pocBrush, profileOpacity, showPocLine, showVahLine, showValLine, showValues, autoFontMin, autoFontMax, textBrush);
+			return indicator.LegVolumeProfile(input, rotationMode, rotationPoints, resetOnNewSession, legsToDisplay, ticksPerRow, valueAreaPercent, widthMode, maxProfileWidthPx, rowAlignment, currentLegOffsetPx, showLeftLine, showTopLine, showBottomLine, showRightLine, profileBrush, valueAreaBrush, pocBrush, profileOpacity, levelLineLengthPercent, showPocLine, showVahLine, showValLine, showValues, autoFontMin, autoFontMax, textBrush);
 		}
 	}
 }
@@ -1098,14 +1090,14 @@ namespace NinjaTrader.NinjaScript.Strategies
 {
 	public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
 	{
-		public Indicators.giuli13.LegVolumeProfile LegVolumeProfile(LegVPRotationMode rotationMode, double rotationPoints, bool resetOnNewSession, int legsToDisplay, int ticksPerRow, int valueAreaPercent, LegVPWidthMode widthMode, int maxProfileWidthPx, LegVPRowAlign rowAlignment, int currentLegOffsetPx, LegVPLineStart linesStartAt, bool showLeftLine, bool showTopLine, bool showBottomLine, bool showRightLine, WpfBrush profileBrush, WpfBrush valueAreaBrush, WpfBrush pocBrush, float profileOpacity, bool showPocLine, bool showVahLine, bool showValLine, bool showValues, int autoFontMin, int autoFontMax, WpfBrush textBrush)
+		public Indicators.giuli13.LegVolumeProfile LegVolumeProfile(LegVPRotationMode rotationMode, double rotationPoints, bool resetOnNewSession, int legsToDisplay, int ticksPerRow, int valueAreaPercent, LegVPWidthMode widthMode, int maxProfileWidthPx, LegVPRowAlign rowAlignment, int currentLegOffsetPx, bool showLeftLine, bool showTopLine, bool showBottomLine, bool showRightLine, WpfBrush profileBrush, WpfBrush valueAreaBrush, WpfBrush pocBrush, float profileOpacity, int levelLineLengthPercent, bool showPocLine, bool showVahLine, bool showValLine, bool showValues, int autoFontMin, int autoFontMax, WpfBrush textBrush)
 		{
-			return indicator.LegVolumeProfile(Input, rotationMode, rotationPoints, resetOnNewSession, legsToDisplay, ticksPerRow, valueAreaPercent, widthMode, maxProfileWidthPx, rowAlignment, currentLegOffsetPx, linesStartAt, showLeftLine, showTopLine, showBottomLine, showRightLine, profileBrush, valueAreaBrush, pocBrush, profileOpacity, showPocLine, showVahLine, showValLine, showValues, autoFontMin, autoFontMax, textBrush);
+			return indicator.LegVolumeProfile(Input, rotationMode, rotationPoints, resetOnNewSession, legsToDisplay, ticksPerRow, valueAreaPercent, widthMode, maxProfileWidthPx, rowAlignment, currentLegOffsetPx, showLeftLine, showTopLine, showBottomLine, showRightLine, profileBrush, valueAreaBrush, pocBrush, profileOpacity, levelLineLengthPercent, showPocLine, showVahLine, showValLine, showValues, autoFontMin, autoFontMax, textBrush);
 		}
 
-		public Indicators.giuli13.LegVolumeProfile LegVolumeProfile(ISeries<double> input , LegVPRotationMode rotationMode, double rotationPoints, bool resetOnNewSession, int legsToDisplay, int ticksPerRow, int valueAreaPercent, LegVPWidthMode widthMode, int maxProfileWidthPx, LegVPRowAlign rowAlignment, int currentLegOffsetPx, LegVPLineStart linesStartAt, bool showLeftLine, bool showTopLine, bool showBottomLine, bool showRightLine, WpfBrush profileBrush, WpfBrush valueAreaBrush, WpfBrush pocBrush, float profileOpacity, bool showPocLine, bool showVahLine, bool showValLine, bool showValues, int autoFontMin, int autoFontMax, WpfBrush textBrush)
+		public Indicators.giuli13.LegVolumeProfile LegVolumeProfile(ISeries<double> input , LegVPRotationMode rotationMode, double rotationPoints, bool resetOnNewSession, int legsToDisplay, int ticksPerRow, int valueAreaPercent, LegVPWidthMode widthMode, int maxProfileWidthPx, LegVPRowAlign rowAlignment, int currentLegOffsetPx, bool showLeftLine, bool showTopLine, bool showBottomLine, bool showRightLine, WpfBrush profileBrush, WpfBrush valueAreaBrush, WpfBrush pocBrush, float profileOpacity, int levelLineLengthPercent, bool showPocLine, bool showVahLine, bool showValLine, bool showValues, int autoFontMin, int autoFontMax, WpfBrush textBrush)
 		{
-			return indicator.LegVolumeProfile(input, rotationMode, rotationPoints, resetOnNewSession, legsToDisplay, ticksPerRow, valueAreaPercent, widthMode, maxProfileWidthPx, rowAlignment, currentLegOffsetPx, linesStartAt, showLeftLine, showTopLine, showBottomLine, showRightLine, profileBrush, valueAreaBrush, pocBrush, profileOpacity, showPocLine, showVahLine, showValLine, showValues, autoFontMin, autoFontMax, textBrush);
+			return indicator.LegVolumeProfile(input, rotationMode, rotationPoints, resetOnNewSession, legsToDisplay, ticksPerRow, valueAreaPercent, widthMode, maxProfileWidthPx, rowAlignment, currentLegOffsetPx, showLeftLine, showTopLine, showBottomLine, showRightLine, profileBrush, valueAreaBrush, pocBrush, profileOpacity, levelLineLengthPercent, showPocLine, showVahLine, showValLine, showValues, autoFontMin, autoFontMax, textBrush);
 		}
 	}
 }

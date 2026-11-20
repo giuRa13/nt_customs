@@ -1,4 +1,9 @@
 ﻿#region Using declarations
+using NinjaTrader.Cbi;
+using NinjaTrader.Data;
+using NinjaTrader.Gui;
+using NinjaTrader.Gui.Tools;
+using NinjaTrader.NinjaScript;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -14,12 +19,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using System.Xml.Linq;
 using System.Xml.Serialization;
-
-using NinjaTrader.Cbi;
-using NinjaTrader.Data;
-using NinjaTrader.Gui;
-using NinjaTrader.Gui.Tools;
-using NinjaTrader.NinjaScript;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.Window;
 #endregion
 
 // Speed of Tape (Instant) as an AddOn window.
@@ -1061,6 +1061,452 @@ namespace NinjaTrader.NinjaScript.AddOns.giuli13
     }
 
     // =========================================================================
+    //  COLOR PICKER (pure WPF: palette + opacity / RGB sliders + hex)
+    // =========================================================================
+    /* public class TapeColorPicker : NTWindow
+    {
+        private Color color;
+        private bool updating;
+        private Slider sa, sr, sg, sb;
+        private TextBlock la, lr, lg, lb;
+        private readonly Border preview;
+        private readonly TextBox hexBox;
+        private string result;
+
+        // returns the picked color as #AARRGGBB, or null if cancelled
+        public static string Pick(Window owner, string currentHex)
+        {
+            var dlg = new TapeColorPicker(TapeGauge.Hex(currentHex, Colors.White)) { Owner = owner };
+            dlg.ShowDialog();
+            return dlg.result;
+        }
+
+        private TapeColorPicker(Color start)
+        {
+            Caption = "Pick a Color";
+            Width = 340;
+            SizeToContent = SizeToContent.Height;
+            ResizeMode = ResizeMode.NoResize;
+            WindowStartupLocation = WindowStartupLocation.CenterOwner;
+
+            var root = new StackPanel { Margin = new Thickness(10) };
+
+            // ---- palette ----
+            var palette = new System.Windows.Controls.Primitives.UniformGrid { Columns = 12 };
+            foreach (Color c in PaletteColors())
+            {
+                Color pc = c;
+                var sw = new Border
+                {
+                    Height = 18,
+                    Margin = new Thickness(1),
+                    Background = new SolidColorBrush(pc),
+                    BorderBrush = Brushes.Gray,
+                    BorderThickness = new Thickness(1),
+                    Cursor = Cursors.Hand,
+                    ToolTip = ToHex(pc)
+                };
+                // palette keeps the current opacity
+                sw.MouseLeftButtonUp += (s, e) => SetColor(Color.FromArgb(color.A, pc.R, pc.G, pc.B), false);
+                palette.Children.Add(sw);
+            }
+            root.Children.Add(palette);
+
+            // ---- sliders ----
+            var sliders = new Grid { Margin = new Thickness(0, 10, 0, 0) };
+            sliders.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60) });
+            sliders.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            sliders.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
+            sa = AddSlider(sliders, 0, "Opacity", out la);
+            sr = AddSlider(sliders, 1, "Red", out lr);
+            sg = AddSlider(sliders, 2, "Green", out lg);
+            sb = AddSlider(sliders, 3, "Blue", out lb);
+            root.Children.Add(sliders);
+
+            // ---- preview + hex ----
+            var bottom = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
+            preview = new Border
+            {
+                Width = 60,
+                Height = 26,
+                BorderBrush = Brushes.Gray,
+                BorderThickness = new Thickness(1),
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+            hexBox = new TextBox { VerticalContentAlignment = VerticalAlignment.Center };
+            hexBox.TextChanged += (s, e) =>
+            {
+                if (updating) return;
+                try { SetColor((Color)ColorConverter.ConvertFromString(hexBox.Text.Trim()), true); }
+                catch { }   // ignore while the user is still typing
+            };
+            DockPanel.SetDock(preview, Dock.Left);
+            bottom.Children.Add(preview);
+            bottom.Children.Add(hexBox);
+            root.Children.Add(bottom);
+
+            // ---- buttons ----
+            var ok = new Button { Content = "OK", MinWidth = 70, Margin = new Thickness(4), IsDefault = true };
+            var cancel = new Button { Content = "Cancel", MinWidth = 70, Margin = new Thickness(4), IsCancel = true };
+            ok.Click += (s, e) => { result = ToHex(color); Close(); };
+            cancel.Click += (s, e) => Close();
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
+            buttons.Children.Add(ok);
+            buttons.Children.Add(cancel);
+            root.Children.Add(buttons);
+
+            Content = root;
+            SetColor(start, false);
+        }
+
+        private Slider AddSlider(Grid g, int row, string label, out TextBlock value)
+        {
+            g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var tl = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center };
+            var sl = new Slider
+            {
+                Minimum = 0,
+                Maximum = 255,
+                IsSnapToTickEnabled = true,
+                TickFrequency = 1,
+                Margin = new Thickness(4, 3, 4, 3),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            value = new TextBlock { VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Right };
+
+            Grid.SetRow(tl, row);
+            Grid.SetRow(sl, row);
+            Grid.SetRow(value, row);
+            Grid.SetColumn(sl, 1);
+            Grid.SetColumn(value, 2);
+            g.Children.Add(tl);
+            g.Children.Add(sl);
+            g.Children.Add(value);
+
+            sl.ValueChanged += (s, e) =>
+            {
+                if (updating || sa == null || sr == null || sg == null || sb == null) return;
+                SetColor(Color.FromArgb((byte)sa.Value, (byte)sr.Value, (byte)sg.Value, (byte)sb.Value), false);
+            };
+            return sl;
+        }
+
+        private void SetColor(Color c, bool fromHex)
+        {
+            updating = true;
+            color = c;
+            sa.Value = c.A; sr.Value = c.R; sg.Value = c.G; sb.Value = c.B;
+            la.Text = Math.Round(c.A / 255.0 * 100) + "%";
+            lr.Text = c.R.ToString();
+            lg.Text = c.G.ToString();
+            lb.Text = c.B.ToString();
+            preview.Background = new SolidColorBrush(c);
+            if (!fromHex)
+                hexBox.Text = ToHex(c);
+            updating = false;
+        }
+
+        private static string ToHex(Color c)
+        {
+            return string.Format("#{0:X2}{1:X2}{2:X2}{3:X2}", c.A, c.R, c.G, c.B);
+        }
+
+        // 12 greys + 12 hues in dark / normal / light
+        private static IEnumerable<Color> PaletteColors()
+        {
+            for (int i = 0; i < 12; i++)
+            {
+                byte v = (byte)Math.Round(i * 255.0 / 11);
+                yield return Color.FromRgb(v, v, v);
+            }
+            foreach (double l in new[] { 0.30, 0.50, 0.72 })
+                for (int h = 0; h < 12; h++)
+                    yield return Hsl(h * 30, 0.85, l);
+        }
+
+        private static Color Hsl(double h, double s, double l)
+        {
+            double c = (1 - Math.Abs(2 * l - 1)) * s;
+            double x = c * (1 - Math.Abs((h / 60) % 2 - 1));
+            double m = l - c / 2;
+            double r = 0, g = 0, b = 0;
+            if (h < 60) { r = c; g = x; }
+            else if (h < 120) { r = x; g = c; }
+            else if (h < 180) { g = c; b = x; }
+            else if (h < 240) { g = x; b = c; }
+            else if (h < 300) { r = x; b = c; }
+            else { r = c; b = x; }
+            return Color.FromRgb((byte)Math.Round((r + m) * 255), (byte)Math.Round((g + m) * 255), (byte)Math.Round((b + m) * 255));
+        }
+    }*/
+
+    // =========================================================================
+    //  COLOR PICKER (saturation / brightness square + hue bar + opacity + hex)
+    // =========================================================================
+    public class TapeColorPicker : NTWindow
+    {
+        private const double SvW = 240, SvH = 170, HueW = 22;
+
+        private double hue, sat, val;      // 0-360, 0-1, 0-1
+        private byte alpha;
+        private bool updating;
+        private string result;
+
+        private readonly Border svBase;                        // pure hue behind the white / black gradients
+        private readonly Canvas svMarker, hueMarker;
+        private readonly Slider opacity;
+        private readonly TextBlock opacityText;
+        private readonly Border preview;
+        private readonly TextBox hexBox;
+
+        // returns the picked color as #AARRGGBB, or null if cancelled
+        public static string Pick(Window owner, string currentHex)
+        {
+            var dlg = new TapeColorPicker(TapeGauge.Hex(currentHex, Colors.White)) { Owner = owner };
+            dlg.ShowDialog();
+            return dlg.result;
+        }
+
+        private TapeColorPicker(Color start)
+        {
+            Caption = "Pick a Color";
+            Width = SvW + HueW + 60;
+            SizeToContent = SizeToContent.Height;
+            ResizeMode = ResizeMode.NoResize;
+            WindowStartupLocation = WindowStartupLocation.CenterOwner;
+
+            var root = new StackPanel { Margin = new Thickness(10) };
+
+            // ---- saturation / brightness square ----
+            var svHost = new Grid { Width = SvW, Height = SvH, Cursor = Cursors.Cross, ClipToBounds = true };
+            svBase = new Border();
+            var whiteLayer = new Border
+            {
+                Background = new LinearGradientBrush(Colors.White, Color.FromArgb(0, 255, 255, 255), new Point(0, 0), new Point(1, 0))
+            };
+            var blackLayer = new Border
+            {
+                Background = new LinearGradientBrush(Color.FromArgb(0, 0, 0, 0), Colors.Black, new Point(0, 0), new Point(0, 1))
+            };
+            svMarker = new Canvas { IsHitTestVisible = false };
+            svMarker.Children.Add(new System.Windows.Shapes.Ellipse { Width = 14, Height = 14, Stroke = Brushes.Black, StrokeThickness = 1 });
+            var inner = new System.Windows.Shapes.Ellipse { Width = 12, Height = 12, Stroke = Brushes.White, StrokeThickness = 2 };
+            Canvas.SetLeft(inner, 1);
+            Canvas.SetTop(inner, 1);
+            svMarker.Children.Add(inner);
+            var svCanvas = new Canvas { IsHitTestVisible = false };
+            svCanvas.Children.Add(svMarker);
+
+            svHost.Children.Add(svBase);
+            svHost.Children.Add(whiteLayer);
+            svHost.Children.Add(blackLayer);
+            svHost.Children.Add(svCanvas);
+            AttachDrag(svHost, p =>
+            {
+                sat = Clamp01(p.X / SvW);
+                val = 1 - Clamp01(p.Y / SvH);
+                UpdateAll(false);
+            });
+
+            // ---- hue bar ----
+            var hueBrush = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
+            Color[] stops = { Colors.Red, Colors.Yellow, Colors.Lime, Colors.Cyan, Colors.Blue, Colors.Magenta, Colors.Red };
+            for (int i = 0; i < stops.Length; i++)
+                hueBrush.GradientStops.Add(new GradientStop(stops[i], i / 6.0));
+
+            var hueHost = new Grid { Width = HueW, Height = SvH, Cursor = Cursors.Hand, Margin = new Thickness(10, 0, 0, 0) };
+            hueHost.Children.Add(new Border { Background = hueBrush, BorderBrush = Brushes.Gray, BorderThickness = new Thickness(1) });
+            hueMarker = new Canvas { IsHitTestVisible = false };
+            hueMarker.Children.Add(new System.Windows.Shapes.Rectangle
+            {
+                Width = HueW + 6,
+                Height = 5,
+                Fill = Brushes.White,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1
+            });
+            var hueCanvas = new Canvas { IsHitTestVisible = false };
+            hueCanvas.Children.Add(hueMarker);
+            hueHost.Children.Add(hueCanvas);
+            AttachDrag(hueHost, p =>
+            {
+                hue = Clamp01(p.Y / SvH) * 360;
+                if (hue >= 360) hue = 359.999;
+                UpdateAll(false);
+            });
+
+            var top = new StackPanel { Orientation = Orientation.Horizontal };
+            top.Children.Add(svHost);
+            top.Children.Add(hueHost);
+            root.Children.Add(top);
+
+            // ---- preview strip ----
+            preview = new Border
+            {
+                Width = SvW,
+                Height = 24,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(0, 4, 0, 0),
+                BorderBrush = Brushes.Gray,
+                BorderThickness = new Thickness(1)
+            };
+            root.Children.Add(preview);
+
+            // ---- opacity ----
+            var opRow = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
+            var opLabel = new TextBlock { Text = "Opacity", Width = 60, VerticalAlignment = VerticalAlignment.Center };
+            opacityText = new TextBlock { Width = 40, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+            opacity = new Slider { Minimum = 0, Maximum = 255, IsSnapToTickEnabled = true, TickFrequency = 1, VerticalAlignment = VerticalAlignment.Center };
+            opacity.ValueChanged += (s, e) =>
+            {
+                if (updating) return;
+                alpha = (byte)opacity.Value;
+                UpdateAll(false);
+            };
+            DockPanel.SetDock(opLabel, Dock.Left);
+            DockPanel.SetDock(opacityText, Dock.Right);
+            opRow.Children.Add(opLabel);
+            opRow.Children.Add(opacityText);
+            opRow.Children.Add(opacity);
+            root.Children.Add(opRow);
+
+            // ---- hex ----
+            var hexRow = new DockPanel { Margin = new Thickness(0, 8, 0, 0) };
+            var hexLabel = new TextBlock { Text = "Hex", Width = 60, VerticalAlignment = VerticalAlignment.Center };
+            hexBox = new TextBox { VerticalContentAlignment = VerticalAlignment.Center };
+            hexBox.TextChanged += (s, e) =>
+            {
+                if (updating) return;
+                try { SetFromColor((Color)ColorConverter.ConvertFromString(hexBox.Text.Trim()), true); }
+                catch { }   // ignore while the user is still typing
+            };
+            DockPanel.SetDock(hexLabel, Dock.Left);
+            hexRow.Children.Add(hexLabel);
+            hexRow.Children.Add(hexBox);
+            root.Children.Add(hexRow);
+
+            // ---- buttons ----
+            var ok = new Button { Content = "OK", MinWidth = 70, Margin = new Thickness(4), IsDefault = true };
+            var cancel = new Button { Content = "Cancel", MinWidth = 70, Margin = new Thickness(4), IsCancel = true };
+            ok.Click += (s, e) => { result = ToHex(CurrentColor()); Close(); };
+            cancel.Click += (s, e) => Close();
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
+            buttons.Children.Add(ok);
+            buttons.Children.Add(cancel);
+            root.Children.Add(buttons);
+
+            Content = root;
+            SetFromColor(start, false);
+        }
+
+        // click + drag inside an element; 'pick' gets the mouse position
+        private static void AttachDrag(Grid host, Action<Point> pick)
+        {
+            host.Background = Brushes.Transparent;   // make the whole area clickable
+            host.MouseLeftButtonDown += (s, e) =>
+            {
+                host.CaptureMouse();
+                pick(e.GetPosition(host));
+                e.Handled = true;
+            };
+            host.MouseMove += (s, e) =>
+            {
+                if (host.IsMouseCaptured)
+                    pick(e.GetPosition(host));
+            };
+            host.MouseLeftButtonUp += (s, e) =>
+            {
+                if (host.IsMouseCaptured)
+                    host.ReleaseMouseCapture();
+            };
+        }
+
+        private void SetFromColor(Color c, bool fromHex)
+        {
+            double h, s, v;
+            ToHsv(c, out h, out s, out v);
+            if (h >= 0) hue = h;   // grey / white / black: keep the current hue
+            sat = s;
+            val = v;
+            alpha = c.A;
+            UpdateAll(fromHex);
+        }
+
+        private Color CurrentColor()
+        {
+            return FromHsv(alpha, hue, sat, val);
+        }
+
+        private void UpdateAll(bool fromHex)
+        {
+            updating = true;
+            Color c = CurrentColor();
+
+            svBase.Background = new SolidColorBrush(FromHsv(255, hue, 1, 1));
+            Canvas.SetLeft(svMarker, sat * SvW - 7);
+            Canvas.SetTop(svMarker, (1 - val) * SvH - 7);
+            Canvas.SetLeft(hueMarker, -3);
+            Canvas.SetTop(hueMarker, hue / 360 * SvH - 2.5);
+
+            preview.Background = new SolidColorBrush(c);
+            opacity.Value = alpha;
+            opacityText.Text = Math.Round(alpha / 255.0 * 100) + "%";
+            if (!fromHex)
+                hexBox.Text = ToHex(c);
+
+            updating = false;
+        }
+
+        // ---- color math ----
+        private static double Clamp01(double x)
+        {
+            return x < 0 ? 0 : x > 1 ? 1 : x;
+        }
+
+        private static string ToHex(Color c)
+        {
+            return string.Format("#{0:X2}{1:X2}{2:X2}{3:X2}", c.A, c.R, c.G, c.B);
+        }
+
+        private static Color FromHsv(byte a, double h, double s, double v)
+        {
+            double c = v * s;
+            double hp = (h % 360) / 60;
+            double x = c * (1 - Math.Abs(hp % 2 - 1));
+            double r = 0, g = 0, b = 0;
+            if (hp < 1) { r = c; g = x; }
+            else if (hp < 2) { r = x; g = c; }
+            else if (hp < 3) { g = c; b = x; }
+            else if (hp < 4) { g = x; b = c; }
+            else if (hp < 5) { r = x; b = c; }
+            else { r = c; b = x; }
+            double m = v - c;
+            return Color.FromArgb(a,
+                (byte)Math.Round((r + m) * 255),
+                (byte)Math.Round((g + m) * 255),
+                (byte)Math.Round((b + m) * 255));
+        }
+
+        // h = -1 when the color has no hue (grey, white, black)
+        private static void ToHsv(Color c, out double h, out double s, out double v)
+        {
+            double r = c.R / 255.0, g = c.G / 255.0, b = c.B / 255.0;
+            double max = Math.Max(r, Math.Max(g, b));
+            double min = Math.Min(r, Math.Min(g, b));
+            double d = max - min;
+
+            v = max;
+            s = max <= 0 ? 0 : d / max;
+
+            if (d == 0) h = -1;
+            else if (max == r) h = 60 * (((g - b) / d) % 6);
+            else if (max == g) h = 60 * ((b - r) / d + 2);
+            else h = 60 * ((r - g) / d + 4);
+            if (h < 0 && d != 0) h += 360;
+        }
+    }
+
+    // =========================================================================
     //  SETTINGS DIALOG (built from the [Display] attributes of TapeSettings)
     // =========================================================================
     public class TapeSettingsWindow : NTWindow
@@ -1366,7 +1812,9 @@ namespace NinjaTrader.NinjaScript.AddOns.giuli13
                     Height = 18,
                     Margin = new Thickness(0, 0, 6, 0),
                     BorderThickness = new Thickness(1),
-                    BorderBrush = Brushes.Gray
+                    BorderBrush = Brushes.Gray,
+                    Cursor = Cursors.Hand,
+                    ToolTip = "Click to pick a color"
                 };
                 var tb = new TextBox { Text = (string)p.GetValue(edit) };
                 Action refresh = () =>
@@ -1376,6 +1824,15 @@ namespace NinjaTrader.NinjaScript.AddOns.giuli13
                 };
                 tb.TextChanged += (s, e) => refresh();
                 refresh();
+
+                // click on the swatch: color picker
+                swatch.MouseLeftButtonUp += (s, e) =>
+                {
+                    string picked = TapeColorPicker.Pick(this, tb.Text);
+                    if (picked != null)
+                        tb.Text = picked;
+                };
+
                 DockPanel.SetDock(swatch, Dock.Left);
                 panel.Children.Add(swatch);
                 panel.Children.Add(tb);
@@ -1398,7 +1855,7 @@ namespace NinjaTrader.NinjaScript.AddOns.giuli13
     // =========================================================================
     //  MAIN WINDOW
     // =========================================================================
-    public class SpeedOfTapeWindow : NTWindow, IWorkspacePersistence
+    public class SpeedOfTapeWindow : Window, IWorkspacePersistence //public class SpeedOfTapeWindow : NTWindow, IWorkspacePersistence
     {
         // new windows start from the "Default" template when one was saved (workspace restore overrides it)
         private TapeSettings settings = TapeSettings.LoadTemplate(TapeSettings.DefaultTemplate) ?? new TapeSettings();
@@ -1414,16 +1871,19 @@ namespace NinjaTrader.NinjaScript.AddOns.giuli13
 
         public SpeedOfTapeWindow()
         {
-            Caption = "Speed of Tape";
-            Width = 420;
-            Height = 320;
+            Title = "Speed of Tape"; //Caption = "Speed of Tape";
+            Width = 260;
+            Height = 800;
 
             // ---- toolbar: instrument selector + settings button ----
             instrumentSelector = new InstrumentSelector
             {
                 LastUsedGroup = "SpeedOfTape",
-                MinWidth = 150,
-                Margin = new Thickness(4, 4, 4, 4)
+                MinWidth = 130,
+                MinHeight = 0,     // the style may set a minimum height: remove it
+                Height = 24,       // try 20-24
+                Margin = new Thickness(2,4,2,4),
+                VerticalContentAlignment = VerticalAlignment.Center
             };
             instrumentSelector.InstrumentChanged += OnInstrumentChanged;
 
@@ -1431,8 +1891,14 @@ namespace NinjaTrader.NinjaScript.AddOns.giuli13
             {
                 Content = "\u2699",
                 ToolTip = "Settings",
-                MinWidth = 28,
-                Margin = new Thickness(0, 4, 4, 4)
+                MinWidth = 0,
+                MinHeight = 0,
+                Width = 24,
+                Height = 24,
+                Padding = new Thickness(0),
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 4, 8, 4)
             };
             settingsButton.Click += (s, e) => OpenSettings();
 
@@ -1447,13 +1913,14 @@ namespace NinjaTrader.NinjaScript.AddOns.giuli13
             gauge.SettingsRequested += (s, e) => OpenSettings();
 
             var grid = new Grid();
-            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            Grid.SetRow(toolbar, 0);
-            Grid.SetRow(gauge, 1);
-            grid.Children.Add(toolbar);
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // row 0: gauge, fills the space
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                        // row 1: toolbar, as tall as needed
+            Grid.SetRow(gauge, 0);
+            Grid.SetRow(toolbar, 1);
             grid.Children.Add(gauge);
+            grid.Children.Add(toolbar);
             Content = grid;
+            Background = new SolidColorBrush(Color.FromRgb(0x14, 0x14, 0x14));   // #141414 // system window only ////////////////////////////////////////////
             Topmost = settings.AlwaysOnTop;
 
             timer = new DispatcherTimer(DispatcherPriority.Render, Dispatcher) { Interval = TimeSpan.FromMilliseconds(250) };
@@ -1494,12 +1961,13 @@ namespace NinjaTrader.NinjaScript.AddOns.giuli13
 
             if (inst == null)
             {
-                Caption = "Speed of Tape";
+                Title = "Speed of Tape"; //Caption = "Speed of Tape";
                 gauge.Status = "Select an instrument";
                 return;
             }
 
-            Caption = "Speed of Tape - " + inst.FullName;
+            //Caption = "Speed of Tape - " + inst.FullName;
+            Title = "Speed of Tape"; //Caption = "Speed of Tape";
             gauge.Status = "Loading " + inst.FullName + "...";
 
             var req = new BarsRequest(inst, StartDate(settings.DaysToLoad), DateTime.Now)

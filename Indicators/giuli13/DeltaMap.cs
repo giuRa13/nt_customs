@@ -47,6 +47,7 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
         private double lastPrice;
         private int lastSide = 1;
         private DateTime calcStart = DateTime.MinValue;
+        private double pendingBuy, pendingSell;            // realtime trades waiting to be assigned to the primary bar
 
         private Brush[] bullPalette, bearPalette;   // index 0 = weak shade, index GradientSteps = strong shade
 
@@ -63,7 +64,7 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
                 Calculate = Calculate.OnEachTick;
                 IsOverlay = true;
                 IsAutoScale = false;                 // transparent plots must not rescale the price panel
-                DisplayInDataBox = true;
+                DisplayInDataBox = false;
                 PaintPriceMarkers = false;
                 DrawOnPricePanel = true;
                 IsSuspendedWhileInactive = false;
@@ -71,22 +72,26 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
 
                 // Parameters
                 Source = DeltaMapSource.EmaDelta;
-                Period = 6;
-                Lookback = 50;
+                Period = 5;
+                Lookback = 30;
                 FullAtMultiple = 2.0;
                 DaysToCalculate = 3;
 
                 // Colors (weak -> strong)
-                BullWeak = MakeBrush("#FF0F4A85");
-                BullStrong = MakeBrush("#FF6FBDFF");
-                BearWeak = MakeBrush("#FF7A1C2B");
-                BearStrong = MakeBrush("#FFFF6B80");
-                GradientSteps = 20;
+                BullWeak = MakeBrush("#FF1B5695");
+                BullStrong = MakeBrush("#FF59A9FF");
+                BearWeak = MakeBrush("#FFA3180F");
+                BearStrong = MakeBrush("#FFF14B40");
+                GradientSteps = 25;
                 ColorOutline = true;
 
                 AddPlot(Brushes.Transparent, "BarDelta");
                 AddPlot(Brushes.Transparent, "Dominance");
                 AddPlot(Brushes.Transparent, "Intensity");
+            }
+            else if (State == State.Realtime)
+            {
+                pendingBuy = pendingSell = 0;
             }
             else if (State == State.Configure)
             {
@@ -141,12 +146,43 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
             if (BarsInProgress != 0)
                 return;
 
+            // Realtime: the primary bar is already updated for this tick (a new bar is already open),
+            // so the trades collected in OnMarketData belong to CurrentBars[0].
+            if (State == State.Realtime && (pendingBuy > 0 || pendingSell > 0) && CurrentBars[0] >= 0)
+            {
+                BarDelta cur = GetBar(CurrentBars[0]);
+                cur.Buy += pendingBuy;
+                cur.Sell += pendingSell;
+                pendingBuy = pendingSell = 0;
+            }
+
             PaintCurrentBar();
+        }
+
+        // Realtime trades: classified with the bid/ask attached to each trade, so a fast market
+        // cannot misclassify them with a quote that has already moved.
+        protected override void OnMarketData(MarketDataEventArgs e)
+        {
+            if (State != State.Realtime || BarsInProgress != 0 || e.MarketDataType != MarketDataType.Last)
+                return;
+            if (e.Time <= calcStart || e.Volume <= 0)
+                return;
+
+            int side = ClassifySide(e.Price, e.Ask, e.Bid);
+            lastPrice = e.Price;
+            lastSide = side;
+
+            if (side > 0) pendingBuy += e.Volume;
+            else pendingSell += e.Volume;
         }
 
         private void ProcessTick()
         {
             if (CurrentBars[1] < 0)
+                return;
+
+            // realtime trades are handled in OnMarketData (exact bid/ask of each trade)
+            if (State == State.Realtime)
                 return;
 
             DateTime t = Times[1][0];
@@ -155,17 +191,12 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
 
             double price = Closes[1][0];
             double vol = Volumes[1][0];
-            int side = ClassifySide(price);
+            int side = ClassifySide(price, BarsArray[1].GetAsk(CurrentBars[1]), BarsArray[1].GetBid(CurrentBars[1]));
             lastPrice = price;
             lastSide = side;
 
-            // Realtime: primary series is updated first -> forming bar is CurrentBars[0].
             // Historical: primary bars are stamped with their close time -> a later trade belongs to the next bar.
-            int idx;
-            if (State == State.Realtime)
-                idx = CurrentBars[0];
-            else
-                idx = (CurrentBars[0] < 0 || t > Times[0][0]) ? CurrentBars[0] + 1 : CurrentBars[0];
+            int idx = (CurrentBars[0] < 0 || t > Times[0][0]) ? CurrentBars[0] + 1 : CurrentBars[0];
             if (idx < 0)
                 return;
 
@@ -192,6 +223,12 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
                 return;
 
             BarDelta b = GetBar(i);
+            if (b.Buy + b.Sell <= 0)
+            {
+                // no tick data for this bar (e.g. missing historical ticks): keep the chart's own colors
+                b.Active = false;
+                return;
+            }
             b.Active = true;
 
             double delta = b.Buy - b.Sell;
@@ -267,24 +304,12 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
         }
 
         // Aggressor side: at/above ask = buy, at/below bid = sell, otherwise tick rule
-        private int ClassifySide(double price)
+        private int ClassifySide(double price, double ask, double bid)
         {
             int tickRule = lastPrice == 0 ? lastSide
                 : price > lastPrice ? 1
                 : price < lastPrice ? -1
                 : lastSide;
-
-            double ask, bid;
-            if (State == State.Realtime)
-            {
-                ask = GetCurrentAsk(1);
-                bid = GetCurrentBid(1);
-            }
-            else
-            {
-                ask = BarsArray[1].GetAsk(CurrentBars[1]);
-                bid = BarsArray[1].GetBid(CurrentBars[1]);
-            }
 
             if (ask > 0 && bid > 0 && ask > bid)
             {
