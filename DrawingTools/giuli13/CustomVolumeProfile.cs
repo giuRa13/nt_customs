@@ -15,16 +15,6 @@ using NinjaTrader.Gui.Chart;
 using NinjaTrader.NinjaScript.DrawingTools;
 #endregion
 
-// Draw a rectangle with two clicks. The tool loads the 1-tick history of the selected time range
-// by itself (BarsRequest), so it does not need Tick Replay and does not depend on the chart bar type.
-//
-//  Mode VolumeAndDelta : volume profile from the LEFT edge of the rectangle to the right,
-//                        delta profile from the LEFT edge to the left (outside the rectangle).
-//  Mode DeltaOnlyLeft  : delta profile only, inside the rectangle, from its LEFT edge to the right.
-//  Mode DeltaOnlyRight : delta profile only, inside the rectangle, from its RIGHT edge to the left.
-//                        With Follow Price the rectangle is made wider (space candles + profile width),
-//                        so the profile sits to the right of the live candles instead of over them.
-//
 // Volume profile = same method as LegVolumeProfile: price in ticks -> volume, rows of N ticks
 // (from the range high or on a global grid), POC tie -> row closest to the middle,
 // value area = standard two-row expansion from the POC.
@@ -182,17 +172,17 @@ namespace NinjaTrader.NinjaScript.DrawingTools.giuli13
                 FollowOffsetCandles = 2;
                 FollowReferenceTime = DateTime.MinValue;
 
-                VolumeBrush = MakeBrush("#FF363B47");
-                ValueAreaBrush = Brushes.Chocolate;
-                PocBrush = Brushes.Magenta;
+                VolumeBrush = MakeBrush("#FF585D68");
+                ValueAreaBrush = MakeBrush("#FFC24400");
+                PocBrush = MakeBrush("#FFFF00FF");
                 VolumeOpacity = 85;
                 ValueAreaPercent = 70;
                 ShowPocLine = true;
-                PocStroke = new Stroke(Brushes.Magenta, DashStyleHelper.Solid, 1);
+                PocStroke = new Stroke(MakeBrush("#FFFF00FF"), DashStyleHelper.Dash, 2);
                 ShowVahLine = true;
-                VahStroke = new Stroke(Brushes.Teal, DashStyleHelper.Dash, 1);
+                VahStroke = new Stroke(MakeBrush("#FFC24400"), DashStyleHelper.Dash, 2);
                 ShowValLine = true;
-                ValStroke = new Stroke(Brushes.Teal, DashStyleHelper.Dash, 1);
+                ValStroke = new Stroke(MakeBrush("#FFC24400"), DashStyleHelper.Dash, 2);
 
                 DeltaPositiveBrush = MakeBrush("#FF0053A6");
                 DeltaNegativeBrush = MakeBrush("#FF75100B");
@@ -201,13 +191,14 @@ namespace NinjaTrader.NinjaScript.DrawingTools.giuli13
                 DeltaBorderBrush = Brushes.Black;
                 ShowDeltaValues = true;
                 DeltaTextMinSize = 8;
-                DeltaTextMaxSize = 18;
+                DeltaTextMaxSize = 24;
                 DeltaTextBold = false;
                 DeltaPositiveTextBrush = MakeBrush("#FFA8CAEC");
                 DeltaNegativeTextBrush = MakeBrush("#FFFF3755");
 
-                OutlineStroke = new Stroke(Brushes.Olive, DashStyleHelper.Solid, 2);
-                ShowTotals = true;
+                OutlineStroke = new Stroke(MakeBrush("#FF808000"), DashStyleHelper.Solid, 2);
+                ShowTotalVolume = true;
+                ShowTotalDelta = true;
                 TotalsFontSize = 11;
                 AlwaysSendToBack = true;
                 ShowDebugInfo = false;
@@ -972,17 +963,28 @@ namespace NinjaTrader.NinjaScript.DrawingTools.giuli13
             RenderTarget.AntialiasMode = SharpDX.Direct2D1.AntialiasMode.PerPrimitive;
             RenderTarget.DrawRectangle(new SharpDX.RectangleF(xL, yT, rectW, yB - yT), outline.BrushDX, outline.Width, outline.StrokeStyle);
 
-            if (drawn && ShowTotals)
-                status = (Mode == CVPMode.VolumeAndDelta ? "Vol " + totalVol.ToString("N0") + "   " : string.Empty)
-                    + "Delta " + (totalDelta > 0 ? "+" : string.Empty) + totalDelta.ToString("N0");
+            // totals: one value per line (volume first, delta below), each with its own checkbox, in every mode
+            if (drawn)
+            {
+                status = null;
+                if (ShowTotalVolume)
+                    status = "Vol " + totalVol.ToString("N0");
+                if (ShowTotalDelta)
+                    status = (status == null ? string.Empty : status + "\n")
+                        + "Delta " + (totalDelta > 0 ? "+" : string.Empty) + totalDelta.ToString("N0");
+            }
+
+            float statusHeight = 0f;
 
             if (status != null)
             {
                 float fontSize = Math.Max(6, TotalsFontSize);
+                int lines = status.Split('\n').Length;
+                statusHeight = fontSize * 1.4f * lines + 4f;
                 using (SharpDX.DirectWrite.TextFormat tf = new SharpDX.DirectWrite.TextFormat(Core.Globals.DirectWriteFactory, "Segoe UI", fontSize))
                 {
                     tf.WordWrapping = SharpDX.DirectWrite.WordWrapping.NoWrap;
-                    RenderTarget.DrawText(status, tf, new SharpDX.RectangleF(xL + 2f, yB + 3f, 2000f, fontSize * 1.6f), outline.BrushDX);
+                    RenderTarget.DrawText(status, tf, new SharpDX.RectangleF(xL + 2f, yB + 3f, 2000f, statusHeight), outline.BrushDX);
                 }
             }
 
@@ -1009,7 +1011,7 @@ namespace NinjaTrader.NinjaScript.DrawingTools.giuli13
                 using (SharpDX.DirectWrite.TextFormat tf = new SharpDX.DirectWrite.TextFormat(Core.Globals.DirectWriteFactory, "Consolas", 11f))
                 {
                     tf.WordWrapping = SharpDX.DirectWrite.WordWrapping.NoWrap;
-                    RenderTarget.DrawText(dbg, tf, new SharpDX.RectangleF(xL + 2f, yB + 8f + Math.Max(6, TotalsFontSize) * 1.6f, 2000f, 80f), outline.BrushDX);
+                    RenderTarget.DrawText(dbg, tf, new SharpDX.RectangleF(xL + 2f, yB + 6f + statusHeight, 2000f, 80f), outline.BrushDX);
                 }
             }
 
@@ -1439,19 +1441,23 @@ namespace NinjaTrader.NinjaScript.DrawingTools.giuli13
         [Display(Name = "Rectangle Outline", GroupName = "General", Order = 0)]
         public Stroke OutlineStroke { get; set; }
 
-        [Display(Name = "Show Totals", GroupName = "General", Order = 1,
-            Description = "Total volume and total delta of the range, under the rectangle.")]
-        public bool ShowTotals { get; set; }
+        [Display(Name = "Show Total Volume", GroupName = "General", Order = 1,
+            Description = "Total volume of the range, under the rectangle (any mode).")]
+        public bool ShowTotalVolume { get; set; }
+
+        [Display(Name = "Show Total Delta", GroupName = "General", Order = 2,
+            Description = "Total delta of the range, under the rectangle, on the line below the volume (any mode).")]
+        public bool ShowTotalDelta { get; set; }
 
         [Range(6, 60)]
-        [Display(Name = "Totals Text Size", GroupName = "General", Order = 2)]
+        [Display(Name = "Totals Text Size", GroupName = "General", Order = 3)]
         public int TotalsFontSize { get; set; }
 
-        [Display(Name = "Show Debug Info", GroupName = "General", Order = 4,
+        [Display(Name = "Show Debug Info", GroupName = "General", Order = 5,
             Description = "Three lines under the rectangle: drawing state, candles and time range used, anchor times, loaded tick range. For troubleshooting.")]
         public bool ShowDebugInfo { get; set; }
 
-        [Display(Name = "Always Send To Back", GroupName = "General", Order = 3,
+        [Display(Name = "Always Send To Back", GroupName = "General", Order = 4,
             Description = "The profile is always drawn first, so candles and everything else on the chart are drawn on top of it.")]
         public bool AlwaysSendToBack
         {
