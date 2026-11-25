@@ -78,10 +78,10 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
                 DaysToCalculate = 3;
 
                 // Colors (weak -> strong)
-                BullWeak = MakeBrush("#FF1B5695");
-                BullStrong = MakeBrush("#FF59A9FF");
-                BearWeak = MakeBrush("#FFA3180F");
-                BearStrong = MakeBrush("#FFF14B40");
+                BullWeak = MakeBrush("#FF214364");
+                BullStrong = MakeBrush("#FF54AAFF");
+                BearWeak = MakeBrush("#FF62231A");
+                BearStrong = MakeBrush("#FFFF5941");
                 GradientSteps = 25;
                 ColorOutline = true;
 

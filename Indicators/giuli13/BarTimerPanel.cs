@@ -23,9 +23,10 @@ using WpfBrush = System.Windows.Media.Brush;
 using WpfBrushes = System.Windows.Media.Brushes;
 #endregion
 
-// Draggable timer panel. Drag it anywhere on the chart; double-click opens the indicator settings.
+// Draggable timer panel in its own small window: drag it anywhere (over other chart windows, other
+// monitors); double-click opens the indicator settings.
 // Modes: time left in the current chart bar, a fixed clock countdown (1h / 30m / 5m / 1m), or the clock (hh:mm:ss).
-// The panel is anchored to the chart edges it is closest to, so it keeps its place when the chart is resized.
+// The panel's screen position is saved with the workspace; it hides when its chart's workspace is hidden.
 
 namespace NinjaTrader.NinjaScript.Indicators.giuli13
 {
@@ -50,13 +51,15 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
         // ---- UI thread only ----
         private SWC.Border border;
         private SWC.TextBlock textBlock, textBlock2;   // first line, optional second line
-        private SW.FrameworkElement host;
         private string lastText, lastText2;
         private int lastTemplateLen = -1, lastTemplateLen2 = -1;
 
-        private bool dragging;
-        private SW.Point dragStart;
-        private double dragLeft, dragTop;
+        // The panel lives in its own small borderless window (like NinjaTrader's PositionTracker),
+        // so it can be dragged anywhere: over other chart windows, other panels, other monitors.
+        private SW.Window panelWindow;
+        private SW.Window chartWindow;      // the chart window the indicator is on
+        private Dispatcher uiDispatcher;
+        private bool closingByCode;
 
         protected override void OnStateChange()
         {
@@ -84,28 +87,33 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
                 // second line: clock under the bar timer
                 ClockPlusTimer = true;
                 Mode2 = BarTimerMode.Clock;
-                TextBrush2 = MakeBrush("#FFFF57FF");   // rgb(255, 87, 255)
+                TextBrush2 = MakeBrush("#FFFF2EFF");   // rgb(255, 87, 255)
                 TextFont2 = new SimpleFont("Arial", 18);
 
-                // default position: bottom right corner, 16 px from the edges
-                AnchorRight = true;
-                AnchorBottom = true;
-                OffsetX = 16;
-                OffsetY = 16;
+                // border (off by default)
+                ShowBorder = false;
+                PanelBorderWidth = 2;
+                PanelBorderBrush = WpfBrushes.White;
+
+                // screen position of the panel (set by dragging). NaN = not placed yet:
+                // the panel then starts at the bottom right corner of the chart
+                ScreenLeft = double.NaN;
+                ScreenTop = double.NaN;
             }
             else if (State == State.Historical)
             {
-                if (ChartControl != null && IsVisible && border == null)
+                if (ChartControl != null && IsVisible && panelWindow == null)
                 {
-                    ChartControl.Dispatcher.InvokeAsync(() =>
+                    uiDispatcher = ChartControl.Dispatcher;
+                    uiDispatcher.InvokeAsync(() =>
                     {
-                        if (State >= State.Terminated || border != null)
+                        if (State >= State.Terminated || panelWindow != null)
                             return;
 
-                        UserControlCollection.Add(CreateControl());
+                        CreatePanelWindow();
 
                         // update the text on its own, even when no ticks arrive
-                        timer = new DispatcherTimer(DispatcherPriority.Render, ChartControl.Dispatcher)
+                        timer = new DispatcherTimer(DispatcherPriority.Render, uiDispatcher)
                         {
                             Interval = TimeSpan.FromMilliseconds(250)
                         };
@@ -117,16 +125,32 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
             }
             else if (State == State.Terminated)
             {
-                var t = timer;
-                timer = null;
-                if (t != null)
+                var d = uiDispatcher;
+                if (d != null)
                 {
-                    t.Dispatcher.InvokeAsync(() =>
+                    d.InvokeAsync(() =>
                     {
-                        t.Stop();
-                        t.Tick -= OnTimerTick;
-                        if (host != null)
-                            host.SizeChanged -= OnHostSizeChanged;
+                        if (timer != null)
+                        {
+                            timer.Stop();
+                            timer.Tick -= OnTimerTick;
+                            timer = null;
+                        }
+
+                        if (chartWindow != null)
+                        {
+                            chartWindow.IsVisibleChanged -= OnChartWindowVisibleChanged;
+                            chartWindow = null;
+                        }
+
+                        if (panelWindow != null)
+                        {
+                            panelWindow.MouseLeftButtonDown -= OnPanelMouseDown;
+                            panelWindow.LocationChanged -= OnPanelLocationChanged;
+                            closingByCode = true;
+                            panelWindow.Close();
+                            panelWindow = null;
+                        }
                     });
                 }
             }
@@ -142,10 +166,8 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
         {
             if (ninjaScript is BarTimerPanel other)
             {
-                other.OffsetX = OffsetX;
-                other.OffsetY = OffsetY;
-                other.AnchorRight = AnchorRight;
-                other.AnchorBottom = AnchorBottom;
+                other.ScreenLeft = ScreenLeft;
+                other.ScreenTop = ScreenTop;
             }
             base.CopyTo(ninjaScript);
         }
@@ -179,25 +201,134 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
             {
                 Background = bg,
                 Padding = new SW.Thickness(PaddingX, PaddingY, PaddingX, PaddingY),
+                BorderThickness = new SW.Thickness(ShowBorder ? Math.Max(0, PanelBorderWidth) : 0),
+                BorderBrush = PanelBorderBrush ?? WpfBrushes.White,
                 Child = content,
                 Cursor = System.Windows.Input.Cursors.SizeAll,
                 ToolTip = "Drag to move - double-click for settings"
             };
 
-            // same events NinjaTrader's DrawingToolTile uses
-            border.MouseDown += OnMouseDown;
-            border.MouseMove += OnMouseMove;
-            border.MouseUp += (s, e) => { if (dragging) { EndDrag(); e.Handled = true; } };
-            border.LostMouseCapture += (s, e) => { if (dragging) EndDrag(); };
+            return border;
+        }
 
-            border.Loaded += (s, e) =>
+        // Creates the floating window that holds the panel and shows it
+        private void CreatePanelWindow()
+        {
+            var content = CreateControl();
+
+            panelWindow = new SW.Window
             {
-                EnsureHost();
-                ClampOffsets();
+                Title = "BarTimerPanel",
+                WindowStyle = SW.WindowStyle.None,
+                ResizeMode = SW.ResizeMode.NoResize,
+                AllowsTransparency = true,
+                Background = WpfBrushes.Transparent,
+                ShowInTaskbar = false,
+                ShowActivated = false,           // do not steal the focus from the chart
+                Topmost = true,                  // stays above the other windows while you move it around
+                SizeToContent = SW.SizeToContent.WidthAndHeight,
+                WindowStartupLocation = SW.WindowStartupLocation.Manual,
+                Content = content
             };
 
-            ApplyPosition();
-            return border;
+            // position: the saved one if it is still on a screen, otherwise the chart's bottom right corner
+            content.Measure(new SW.Size(double.PositiveInfinity, double.PositiveInfinity));
+            SW.Size size = content.DesiredSize;
+            if (IsOnScreen(ScreenLeft, ScreenTop, size))
+            {
+                panelWindow.Left = ScreenLeft;
+                panelWindow.Top = ScreenTop;
+            }
+            else
+            {
+                SW.Point p = DefaultPosition(size);
+                panelWindow.Left = p.X;
+                panelWindow.Top = p.Y;
+            }
+            ScreenLeft = panelWindow.Left;
+            ScreenTop = panelWindow.Top;
+
+            panelWindow.MouseLeftButtonDown += OnPanelMouseDown;
+            panelWindow.LocationChanged += OnPanelLocationChanged;
+            panelWindow.Closing += (s, e) => { if (!closingByCode) e.Cancel = true; };   // only the indicator closes it
+
+            // hide the panel when its chart window is hidden (other workspace) and show it again after
+            chartWindow = SW.Window.GetWindow(ChartControl);
+            if (chartWindow != null)
+                chartWindow.IsVisibleChanged += OnChartWindowVisibleChanged;
+
+            if (chartWindow == null || chartWindow.IsVisible)
+                panelWindow.Show();
+        }
+
+        // Bottom right corner of the chart, 16 px from the edges (screen coordinates in WPF units)
+        private SW.Point DefaultPosition(SW.Size size)
+        {
+            try
+            {
+                SW.Point topLeft = ChartControl.PointToScreen(new SW.Point(0, 0));
+                SW.Point bottomRight = ChartControl.PointToScreen(new SW.Point(ChartControl.ActualWidth, ChartControl.ActualHeight));
+
+                // PointToScreen gives device pixels: convert to WPF units (matters on scaled displays)
+                var source = SW.PresentationSource.FromVisual(ChartControl);
+                if (source != null && source.CompositionTarget != null)
+                {
+                    var m = source.CompositionTarget.TransformFromDevice;
+                    topLeft = m.Transform(topLeft);
+                    bottomRight = m.Transform(bottomRight);
+                }
+
+                return new SW.Point(bottomRight.X - size.Width - 16, bottomRight.Y - size.Height - 16);
+            }
+            catch
+            {
+                return new SW.Point(SW.SystemParameters.WorkArea.Right - size.Width - 16,
+                                    SW.SystemParameters.WorkArea.Bottom - size.Height - 16);
+            }
+        }
+
+        // True when at least part of the panel would be on one of the screens
+        private static bool IsOnScreen(double left, double top, SW.Size size)
+        {
+            if (double.IsNaN(left) || double.IsNaN(top))
+                return false;
+
+            double vl = SW.SystemParameters.VirtualScreenLeft;
+            double vt = SW.SystemParameters.VirtualScreenTop;
+            double vr = vl + SW.SystemParameters.VirtualScreenWidth;
+            double vb = vt + SW.SystemParameters.VirtualScreenHeight;
+
+            return left + Math.Max(20, size.Width) > vl + 20 && left < vr - 20
+                && top + Math.Max(20, size.Height) > vt + 20 && top < vb - 20;
+        }
+
+        // Drag anywhere; double-click opens the indicator settings
+        private void OnPanelMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (e.ClickCount > 1)
+            {
+                ChartControl?.OnIndicatorsHotKey(this, null);
+                return;
+            }
+
+            try { panelWindow.DragMove(); }
+            catch { }
+        }
+
+        private void OnPanelLocationChanged(object sender, EventArgs e)
+        {
+            if (panelWindow == null) return;
+            ScreenLeft = panelWindow.Left;
+            ScreenTop = panelWindow.Top;
+        }
+
+        private void OnChartWindowVisibleChanged(object sender, SW.DependencyPropertyChangedEventArgs e)
+        {
+            if (panelWindow == null || chartWindow == null) return;
+            if (chartWindow.IsVisible)
+                panelWindow.Show();
+            else
+                panelWindow.Hide();
         }
 
         private static SWC.TextBlock MakeTextBlock(SimpleFont font, WpfBrush brush)
@@ -213,109 +344,6 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
                 HorizontalAlignment = SW.HorizontalAlignment.Center,
                 VerticalAlignment = SW.VerticalAlignment.Center
             };
-        }
-
-        // The element the panel is placed in. The user-control collection has no LOGICAL parent,
-        // so the visual parent is used (falls back to the chart panel).
-        private bool EnsureHost()
-        {
-            if (host != null) return true;
-            if (border == null) return false;
-
-            host = SWM.VisualTreeHelper.GetParent(border) as SW.FrameworkElement ?? ChartPanel;
-            if (host != null)
-                host.SizeChanged += OnHostSizeChanged;
-            return host != null;
-        }
-
-        // Position = distance from the nearest left/right and top/bottom edge
-        private void ApplyPosition()
-        {
-            if (border == null) return;
-
-            border.HorizontalAlignment = AnchorRight ? SW.HorizontalAlignment.Right : SW.HorizontalAlignment.Left;
-            border.VerticalAlignment = AnchorBottom ? SW.VerticalAlignment.Bottom : SW.VerticalAlignment.Top;
-            border.Margin = new SW.Thickness(
-                AnchorRight ? 0 : OffsetX,
-                AnchorBottom ? 0 : OffsetY,
-                AnchorRight ? OffsetX : 0,
-                AnchorBottom ? OffsetY : 0);
-        }
-
-        // Keeps the panel fully visible when the chart gets smaller
-        private void ClampOffsets()
-        {
-            if (border == null || host == null || host.ActualWidth <= 0 || host.ActualHeight <= 0)
-                return;
-
-            OffsetX = Math.Max(0, Math.Min(OffsetX, host.ActualWidth - border.ActualWidth));
-            OffsetY = Math.Max(0, Math.Min(OffsetY, host.ActualHeight - border.ActualHeight));
-            ApplyPosition();
-        }
-
-        private void OnHostSizeChanged(object sender, SW.SizeChangedEventArgs e)
-        {
-            if (!dragging)
-                ClampOffsets();
-        }
-
-        private void OnMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
-            => HandleMouseDown(e);
-
-        private void HandleMouseDown(System.Windows.Input.MouseButtonEventArgs e)
-        {
-            if (e.ChangedButton != System.Windows.Input.MouseButton.Left || !EnsureHost()) return;
-            e.Handled = true;   // the chart must not react to clicks on the panel
-
-            if (e.ClickCount > 1)
-            {
-                ChartControl?.OnIndicatorsHotKey(this, null);
-                return;
-            }
-
-            // during the drag the panel is placed from the top-left corner
-            SW.Point p = border.TranslatePoint(new SW.Point(0, 0), host);
-            dragLeft = p.X;
-            dragTop = p.Y;
-            dragStart = e.GetPosition(host);
-
-            border.HorizontalAlignment = SW.HorizontalAlignment.Left;
-            border.VerticalAlignment = SW.VerticalAlignment.Top;
-            border.Margin = new SW.Thickness(dragLeft, dragTop, 0, 0);
-
-            dragging = true;
-            border.CaptureMouse();
-        }
-
-        private void OnMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
-        {
-            if (!dragging || host == null) return;
-
-            SW.Point p = e.GetPosition(host);
-            double left = Math.Max(0, Math.Min(dragLeft + (p.X - dragStart.X), host.ActualWidth - border.ActualWidth));
-            double top = Math.Max(0, Math.Min(dragTop + (p.Y - dragStart.Y), host.ActualHeight - border.ActualHeight));
-            border.Margin = new SW.Thickness(left, top, 0, 0);
-        }
-
-        // Saves the position relative to the closest edges (so a panel near the bottom right stays there on resize)
-        private void EndDrag()
-        {
-            dragging = false;
-            if (border.IsMouseCaptured)
-                border.ReleaseMouseCapture();
-            if (host == null) return;
-
-            double left = border.Margin.Left;
-            double top = border.Margin.Top;
-            double w = border.ActualWidth;
-            double h = border.ActualHeight;
-
-            AnchorRight = left + w / 2 > host.ActualWidth / 2;
-            AnchorBottom = top + h / 2 > host.ActualHeight / 2;
-            OffsetX = AnchorRight ? host.ActualWidth - left - w : left;
-            OffsetY = AnchorBottom ? host.ActualHeight - top - h : top;
-
-            ClampOffsets();
         }
 
         private void OnTimerTick(object sender, EventArgs e)
@@ -496,18 +524,31 @@ namespace NinjaTrader.NinjaScript.Indicators.giuli13
             Description = "Space between the text and the top/bottom borders of the panel.")]
         public int PaddingY { get; set; }
 
+        [Display(Name = "Border", Order = 4, GroupName = "Panel",
+            Description = "Draws a border around the panel.")]
+        public bool ShowBorder { get; set; }
+
+        [Range(1, 20)]
+        [Display(Name = "Border Width (px)", Order = 5, GroupName = "Panel")]
+        public int PanelBorderWidth { get; set; }
+
+        [XmlIgnore]
+        [Display(Name = "Border Color", Order = 6, GroupName = "Panel")]
+        public WpfBrush PanelBorderBrush { get; set; }
+
+        [Browsable(false)]
+        public string PanelBorderBrushSerialize
+        {
+            get { return Serialize.BrushToString(PanelBorderBrush); }
+            set { PanelBorderBrush = Serialize.StringToBrush(value); }
+        }
+
         // ===== Position (set by dragging, saved with the workspace) =====
         [Browsable(false)]
-        public double OffsetX { get; set; }
+        public double ScreenLeft { get; set; }
 
         [Browsable(false)]
-        public double OffsetY { get; set; }
-
-        [Browsable(false)]
-        public bool AnchorRight { get; set; }
-
-        [Browsable(false)]
-        public bool AnchorBottom { get; set; }
+        public double ScreenTop { get; set; }
 
         #endregion
     }
